@@ -83,21 +83,29 @@ module ActionDispatch::Routing
     #
     #    devise_for :users, :controllers => { :sessions => "users/sessions" }
     #
+    #  * :skip => tell which modules you want to skip routes from being created:
+    #
+    #    devise_for :users, :skip => :authenticatable
+    #
     def devise_for(*resources)
       options = resources.extract_options!
       resources.map!(&:to_sym)
 
-      controllers = Hash.new { |h,k| h[k] = "devise/#{k}" }
-      controllers.merge!(options.delete(:controllers) || {})
-
       resources.each do |resource|
-        mapping = Devise::Mapping.new(resource, options.dup)
+        mapping = Devise::Mapping.new(resource, options)
+
+        unless mapping.to.respond_to?(:devise)
+          raise "#{mapping.to.name} does not respond to 'devise' method. This usually means you haven't " <<
+            "loaded your ORM file or it's being loaded to late. To fix it, be sure to require 'devise/orm/YOUR_ORM' " <<
+            "inside 'config/initializers/devise.rb' or before your application definition in 'config/application.rb'"
+        end
 
         Devise.default_scope ||= mapping.name
         Devise.mappings[mapping.name] = mapping
 
-        mapping.for.each do |mod|
-          send(mod, mapping, controllers) if self.respond_to?(mod, true)
+        routes_modules = mapping.modules - Array(options.delete(:skip))
+        routes_modules.each do |mod|
+          send(mod, mapping, mapping.controllers) if self.respond_to?(mod, true)
         end
       end
     end

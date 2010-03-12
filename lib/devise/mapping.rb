@@ -18,11 +18,11 @@ module Devise
   #   mapping.to   #=> User
   #   # is the class to be loaded from routes, given in the route as :class_name.
   #
-  #   mapping.for  #=> [:authenticatable]
+  #   mapping.modules  #=> [:authenticatable]
   #   # is the modules included in the class
   #
   class Mapping #:nodoc:
-    attr_reader :name, :as, :path_names, :path_prefix
+    attr_reader :name, :as, :controllers, :path_names, :path_prefix
 
     # Loop through all mappings looking for a map that matches with the requested
     # path (ie /users/sign_in). If a path prefix is given, it's taken into account.
@@ -62,15 +62,20 @@ module Devise
       @name  = (options.delete(:scope) || name.to_s.singularize).to_sym
 
       @path_prefix = "/#{options.delete(:path_prefix)}/".squeeze("/")
+
+      @controllers = Hash.new { |h,k| h[k] = "devise/#{k}" }
+      @controllers.merge!(options.delete(:controllers) || {})
+
       @path_names  = Hash.new { |h,k| h[k] = k.to_s }
       @path_names.merge!(options.delete(:path_names) || {})
     end
 
     # Return modules for the mapping.
-    def for
-      @for ||= to.devise_modules
+    def modules
+      @modules ||= to.devise_modules
     end
 
+    # Gives the class the mapping points to.
     # Reload mapped class each time when cache_classes is false.
     def to
       return @to if @to
@@ -79,9 +84,14 @@ module Devise
       klass
     end
 
-    # Check if the respective controller has a module in the mapping class.
-    def allows?(controller)
-      (self.for & CONTROLLERS[controller.to_sym]).present?
+    # Keep a list of allowed controllers for this mapping. It's useful to ensure
+    # that an Admin cannot access the registrations controller unless it has
+    # :registerable in the model.
+    def allowed_controllers
+      @allowed_controllers ||= begin
+        canonical = CONTROLLERS.values_at(*self.modules).compact
+        @controllers.values_at(*canonical)
+      end
     end
 
     # Return in which position in the path prefix devise should find the as mapping.
@@ -98,18 +108,15 @@ module Devise
     # Example:
     #
     #   def confirmable?
-    #     self.for.include?(:confirmable)
+    #     self.modules.include?(:confirmable)
     #   end
     #
-    def self.register(*modules)
-      modules.each do |m|
-        class_eval <<-METHOD, __FILE__, __LINE__ + 1
-          def #{m}?
-            self.for.include?(:#{m})
-          end
-        METHOD
-      end
+    def self.register(m)
+      class_eval <<-METHOD, __FILE__, __LINE__ + 1
+        def #{m}?
+          self.modules.include?(:#{m})
+        end
+      METHOD
     end
-    Devise::Mapping.register *ALL
   end
 end
