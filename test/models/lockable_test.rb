@@ -1,43 +1,46 @@
-require 'test/test_helper'
+require 'test_helper'
 
 class LockableTest < ActiveSupport::TestCase
-
   def setup
     setup_mailer
   end
 
-  test "should increment failed attempts on unsuccessful authentication" do
-    user = create_user
-    assert_equal 0, user.failed_attempts
-
-    authenticated_user = User.authenticate(:email => user.email, :password => "anotherpassword")
-    assert_equal 1, user.reload.failed_attempts
-  end
-
-  test "should lock account base on maximum_attempts" do
-    user = create_user
-    attempts = Devise.maximum_attempts + 1
-    attempts.times { authenticated_user = User.authenticate(:email => user.email, :password => "anotherpassword") }
-    assert user.reload.access_locked?
-  end
-
   test "should respect maximum attempts configuration" do
     user = create_user
+    user.confirm!
     swap Devise, :maximum_attempts => 2 do
-      3.times { authenticated_user = User.authenticate(:email => user.email, :password => "anotherpassword") }
+      3.times { user.valid_for_authentication?{ false } }
       assert user.reload.access_locked?
     end
   end
 
-  test "should clear failed_attempts on successfull sign in" do
+  test "should clear failed_attempts on successfull validation" do
     user = create_user
-    User.authenticate(:email => user.email, :password => "anotherpassword")
+    user.confirm!
+    user.valid_for_authentication?{ false }
     assert_equal 1, user.reload.failed_attempts
-    User.authenticate(:email => user.email, :password => "123456")
+    user.valid_for_authentication?{ true }
     assert_equal 0, user.reload.failed_attempts
   end
 
-  test "should verify wheter a user is locked or not" do
+  test "should not touch failed_attempts if lock_strategy is none" do
+    user = create_user
+    user.confirm!
+    swap Devise, :lock_strategy => :none, :maximum_attempts => 2 do
+      3.times { user.valid_for_authentication?{ false } }
+      assert !user.access_locked?
+      assert_equal 0, user.failed_attempts
+    end
+  end
+
+  test 'should be valid for authentication with a unlocked user' do
+    user = create_user
+    user.lock_access!
+    user.unlock_access!
+    assert user.valid_for_authentication?{ true }
+  end
+
+  test "should verify whether a user is locked or not" do
     user = create_user
     assert_not user.access_locked?
     user.lock_access!
@@ -101,16 +104,6 @@ class LockableTest < ActiveSupport::TestCase
     assert_not_nil user.unlock_token
   end
 
-  test 'should not regenerate unlock token if it already exists' do
-    user = create_user
-    user.lock!
-    3.times do
-      token = user.unlock_token
-      user.resend_unlock_token
-      assert_equal token, user.unlock_token
-    end
-  end
-
   test "should never generate the same unlock token for different users" do
     unlock_tokens = []
     3.times do
@@ -158,22 +151,14 @@ class LockableTest < ActiveSupport::TestCase
 
   test 'should return a new record with errors when a invalid token is given' do
     locked_user = User.unlock_access_by_token('invalid_token')
-    assert locked_user.new_record?
+    assert_not locked_user.persisted?
     assert_equal "is invalid", locked_user.errors[:unlock_token].join
   end
 
   test 'should return a new record with errors when a blank token is given' do
     locked_user = User.unlock_access_by_token('')
-    assert locked_user.new_record?
+    assert_not locked_user.persisted?
     assert_equal "can't be blank", locked_user.errors[:unlock_token].join
-  end
-
-  test 'should authenticate a unlocked user' do
-    user = create_user
-    user.lock_access!
-    user.unlock_access!
-    authenticated_user = User.authenticate(:email => user.email, :password => user.password)
-    assert_equal authenticated_user, user
   end
 
   test 'should find a user to send unlock instructions' do
@@ -185,7 +170,7 @@ class LockableTest < ActiveSupport::TestCase
 
   test 'should return a new user if no email was found' do
     unlock_user = User.send_unlock_instructions(:email => "invalid@email.com")
-    assert unlock_user.new_record?
+    assert_not unlock_user.persisted?
   end
 
   test 'should add error to new user email if no email was found' do

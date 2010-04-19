@@ -1,8 +1,5 @@
-require 'devise/models/activatable'
-
 module Devise
   module Models
-
     # Handles blocking a user access after a certain number of attempts.
     # Lockable accepts two different strategies to unlock a user after it's
     # blocked: email and time. The former will send an email to the user when
@@ -13,13 +10,15 @@ module Devise
     # Configuration:
     #
     #   maximum_attempts: how many attempts should be accepted before blocking the user.
-    #   unlock_strategy: unlock the user account by :time, :email or :both.
+    #   lock_strategy: lock the user account by :failed_attempts or :none.
+    #   unlock_strategy: unlock the user account by :time, :email, :both or :none.
     #   unlock_in: the time you want to lock the user after to lock happens. Only
     #              available when unlock_strategy is :time or :both.
     #
     module Lockable
-      extend ActiveSupport::Concern
-      include Devise::Models::Activatable
+      extend  ActiveSupport::Concern
+
+      delegate :lock_strategy_enabled?, :unlock_strategy_enabled?, :to => "self.class"
 
       # Lock an user setting it's locked_at to actual time.
       def lock_access!
@@ -37,8 +36,8 @@ module Devise
       def unlock_access!
         if_access_locked do
           self.locked_at = nil
-          self.failed_attempts = 0
-          self.unlock_token = nil
+          self.failed_attempts = 0 if respond_to?(:failed_attempts=)
+          self.unlock_token = nil  if respond_to?(:unlock_token=)
           save(:validate => false)
         end
       end
@@ -55,11 +54,7 @@ module Devise
 
       # Resend the unlock instructions if the user is locked.
       def resend_unlock_token
-        if_access_locked do
-          generate_unlock_token unless unlock_token.present?
-          save(:validate => false)
-          send_unlock_instructions
-        end
+        if_access_locked { send_unlock_instructions }
       end
 
       # Overwrites active? from Devise::Models::Activatable for locking purposes
@@ -77,25 +72,35 @@ module Devise
       # Overwrites valid_for_authentication? from Devise::Models::Authenticatable
       # for verifying whether an user is allowed to sign in or not. If the user
       # is locked, it should never be allowed.
-      def valid_for_authentication?(attributes)
-        if result = super
+      def valid_for_authentication?
+        return super unless persisted? && lock_strategy_enabled?(:failed_attempts)
+
+        case (result = super)
+        when Symbol
+          return result
+        when TrueClass
           self.failed_attempts = 0
-        else
+        when FalseClass
           self.failed_attempts += 1
-          if failed_attempts > self.class.maximum_attempts
-            lock_access! 
-            return false
+          if attempts_exceeded?
+            lock_access!
+            return :locked
           end
         end
+
         save(:validate => false) if changed?
         result
       end
 
       protected
 
+        def attempts_exceeded?
+          self.failed_attempts > self.class.maximum_attempts
+        end
+
         # Generates unlock token
         def generate_unlock_token
-          self.unlock_token = Devise.friendly_token
+          self.unlock_token = self.class.unlock_token
         end
 
         # Tells if the lock is expired if :time unlock strategy is active
@@ -118,11 +123,6 @@ module Devise
           end
         end
 
-        # Is the unlock enabled for the given unlock strategy?
-        def unlock_strategy_enabled?(strategy)
-          [:both, strategy].include?(self.class.unlock_strategy)
-        end
-
       module ClassMethods
         # Attempt to find a user by it's email. If a record is found, send new
         # unlock instructions to it. If not user is found, returns a new user
@@ -130,7 +130,7 @@ module Devise
         # Options must contain the user email
         def send_unlock_instructions(attributes={})
          lockable = find_or_initialize_with_error_by(:email, attributes[:email], :not_found)
-         lockable.resend_unlock_token unless lockable.new_record?
+         lockable.resend_unlock_token if lockable.persisted?
          lockable
         end
 
@@ -140,11 +140,25 @@ module Devise
         # Options must have the unlock_token
         def unlock_access_by_token(unlock_token)
           lockable = find_or_initialize_with_error_by(:unlock_token, unlock_token)
-          lockable.unlock_access! unless lockable.new_record?
+          lockable.unlock_access! if lockable.persisted?
           lockable
         end
 
-        Devise::Models.config(self, :maximum_attempts, :unlock_strategy, :unlock_in)
+        # Is the unlock enabled for the given unlock strategy?
+        def unlock_strategy_enabled?(strategy)
+          [:both, strategy].include?(self.unlock_strategy)
+        end
+
+        # Is the lock enabled for the given lock strategy?
+        def lock_strategy_enabled?(strategy)
+          self.lock_strategy == strategy
+        end
+
+        def unlock_token
+          Devise.friendly_token
+        end
+
+        Devise::Models.config(self, :maximum_attempts, :lock_strategy, :unlock_strategy, :unlock_in)
       end
     end
   end

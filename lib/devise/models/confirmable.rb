@@ -1,8 +1,5 @@
-require 'devise/models/activatable'
-
 module Devise
   module Models
-
     # Confirmable is responsible to verify if an account is already confirmed to
     # sign in, and to send emails with confirmation instructions.
     # Confirmation instructions are sent to the user email after creating a
@@ -30,7 +27,6 @@ module Devise
     #   User.find(1).resend_confirmation! # generates a new token and resent it
     module Confirmable
       extend ActiveSupport::Concern
-      include Devise::Models::Activatable
 
       included do
         before_create :generate_confirmation_token, :if => :confirmation_required?
@@ -49,7 +45,7 @@ module Devise
 
       # Verifies whether a user is confirmed or not
       def confirmed?
-        !new_record? && !confirmed_at.nil?
+        persisted? && !confirmed_at.nil?
       end
 
       # Send confirmation instructions by email
@@ -57,15 +53,9 @@ module Devise
         ::Devise::Mailer.confirmation_instructions(self).deliver
       end
 
-      # Remove confirmation date and send confirmation instructions, to ensure
-      # after sending these instructions the user won't be able to sign in without
-      # confirming it's account
+      # Resend confirmation token. This method does not need to generate a new token.
       def resend_confirmation_token
-        unless_confirmed do
-          generate_confirmation_token
-          save(:validate => false)
-          send_confirmation_instructions
-        end
+        unless_confirmed { send_confirmation_instructions }
       end
 
       # Overwrites active? from Devise::Models::Activatable for confirmation
@@ -133,7 +123,7 @@ module Devise
         # this token is being generated
         def generate_confirmation_token
           self.confirmed_at = nil
-          self.confirmation_token = Devise.friendly_token
+          self.confirmation_token = self.class.confirmation_token
           self.confirmation_sent_at = Time.now.utc
         end
 
@@ -144,7 +134,7 @@ module Devise
         # Options must contain the user email
         def send_confirmation_instructions(attributes={})
           confirmable = find_or_initialize_with_error_by(:email, attributes[:email], :not_found)
-          confirmable.resend_confirmation_token unless confirmable.new_record?
+          confirmable.resend_confirmation_token if confirmable.persisted?
           confirmable
         end
 
@@ -154,8 +144,12 @@ module Devise
         # Options must have the confirmation_token
         def confirm_by_token(confirmation_token)
           confirmable = find_or_initialize_with_error_by(:confirmation_token, confirmation_token)
-          confirmable.confirm! unless confirmable.new_record?
+          confirmable.confirm! if confirmable.persisted?
           confirmable
+        end
+
+        def confirmation_token
+          Devise.friendly_token
         end
 
         Devise::Models.config(self, :confirm_within)

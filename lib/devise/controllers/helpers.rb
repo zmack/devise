@@ -23,18 +23,6 @@ module Devise
         false
       end
 
-      # Attempts to authenticate the given scope by running authentication hooks,
-      # but does not redirect in case of failures.
-      def authenticate(scope)
-        warden.authenticate(:scope => scope)
-      end
-
-      # Attempts to authenticate the given scope by running authentication hooks,
-      # redirecting in case of failures.
-      def authenticate!(scope)
-        warden.authenticate!(:scope => scope)
-      end
-
       # Check if the given scope is signed in session, without running
       # authentication hooks.
       def signed_in?(scope)
@@ -79,7 +67,7 @@ module Devise
       #
       def stored_location_for(resource_or_scope)
         scope = Devise::Mapping.find_scope!(resource_or_scope)
-        session.delete(:"#{scope}.return_to")
+        session.delete(:"#{scope}_return_to")
       end
 
       # The default url to be used after signing in. This is used by all Devise
@@ -129,10 +117,10 @@ module Devise
       #
       # If just a symbol is given, consider that the user was already signed in
       # through other means and just perform the redirection.
-      def sign_in_and_redirect(resource_or_scope, resource=nil, skip=false)
+      def sign_in_and_redirect(resource_or_scope, resource=nil)
         scope      = Devise::Mapping.find_scope!(resource_or_scope)
         resource ||= resource_or_scope
-        sign_in(scope, resource) unless skip
+        sign_in(scope, resource) unless warden.user(scope) == resource
         redirect_to stored_location_for(scope) || after_sign_in_path_for(resource)
       end
 
@@ -150,9 +138,9 @@ module Devise
       # access that specific controller/action.
       # Example:
       #
-      #   Maps:
-      #     User => :authenticatable
-      #     Admin => :authenticatable
+      #   Roles:
+      #     User
+      #     Admin
       #
       #   Generated methods:
       #     authenticate_user!  # Signs user in or redirect

@@ -18,22 +18,28 @@ class DeviseGenerator < Rails::Generators::NamedBase
     Time.now.utc.strftime("%Y%m%d%H%M%S")
   end
 
+  class_option :orm
   class_option :migration, :type => :boolean, :default => orm_has_migration?
 
   def invoke_orm_model
-    if File.exists?(File.join(destination_root, model_path))
+    if model_exists?
       say "* Model already exists. Adding Devise behavior."
     else
-      invoke "model", [name], :migration => false
+      invoke "model", [name], :migration => false, :orm => options[:orm]
+
+      unless model_exists?
+        abort "Tried to invoke the model generator for '#{options[:orm]}' but could not find it.\n" <<
+              "Please create your model by hand before calling `rails g devise #{name}`."
+      end
     end
   end
 
   def inject_devise_config_into_model
     inject_into_class model_path, class_name, <<-CONTENT
   # Include default devise modules. Others available are:
-  # :http_authenticatable, :token_authenticatable, :lockable, :timeoutable and :activatable
-  devise :registerable, :authenticatable, :confirmable, :recoverable,
-         :rememberable, :trackable, :validatable
+  # :token_authenticatable, :lockable and :timeoutable
+  devise :database_authenticatable, :registerable, :confirmable,
+         :recoverable, :rememberable, :trackable, :validatable
 
   # Setup accessible (or protected) attributes for your model
   attr_accessible :email, :password, :password_confirmation
@@ -50,6 +56,10 @@ CONTENT
   end
 
   protected
+
+    def model_exists?
+      File.exists?(File.join(destination_root, model_path))
+    end
 
     def model_path
       @model_path ||= File.join("app", "models", "#{file_path}.rb")

@@ -1,4 +1,4 @@
-require 'test/test_helper'
+require 'test_helper'
 
 class RegistrationTest < ActionController::IntegrationTest
 
@@ -28,9 +28,9 @@ class RegistrationTest < ActionController::IntegrationTest
     fill_in 'password confirmation', :with => 'new_user123'
     click_button 'Sign up'
 
-    assert_contain 'You have signed up successfully.'
+    assert_contain 'You have signed up successfully'
     assert_contain 'Sign in'
-    assert_not_contain 'Confirm your account'
+    assert_not_contain 'You have to confirm your account before continuing'
 
     assert_not warden.authenticated?(:user)
 
@@ -48,7 +48,7 @@ class RegistrationTest < ActionController::IntegrationTest
     click_button 'Sign up'
 
     assert_template 'registrations/new'
-    assert_have_selector '#errorExplanation'
+    assert_have_selector '#error_explanation'
     assert_contain "Email is invalid"
     assert_contain "Password doesn't match confirmation"
     assert_nil User.first
@@ -73,7 +73,9 @@ class RegistrationTest < ActionController::IntegrationTest
 
   test 'a guest should not be able to change account' do
     get edit_user_registration_path
-    assert_redirected_to new_user_session_path(:unauthenticated => true)
+    assert_redirected_to new_user_session_path
+    follow_redirect!
+    assert_contain 'You need to sign in or sign up before continuing.'
   end
 
   test 'a signed in user should not be able to access sign up' do
